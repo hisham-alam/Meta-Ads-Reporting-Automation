@@ -56,8 +56,7 @@ class SheetsManager:
     AD_DETAILS_COLUMNS = [
         "Launch Date", "Ad Name", "Status", 
         "Action", "Spend", "CPM", "Hook Rate", 
-        "VT Rate", "CTR", "CPC", "Click to Reg", "CPR", 
-        "Demographics", "Placements"
+        "VT Rate", "CTR", "CPC", "Click to Reg", "CPR"
     ]
     
     SEGMENTS_COLUMNS = [
@@ -1156,13 +1155,14 @@ class SheetsManager:
         except Exception as e:
             logger.exception(f"Failed to format ad details row: {str(e)}")
     
-    def update_ad_details_batch(self, ads_data: List[Dict[str, Any]]) -> Tuple[int, int]:
+    def update_ad_details_batch(self, ads_data: List[Dict[str, Any]], benchmarks: Optional[Dict[str, Any]] = None) -> Tuple[int, int]:
         """
         Batch update multiple ad records in the Ad Details tab
         
         Args:
             ads_data: List of dictionaries containing ad_data and analysis_result pairs
                 [{"ad_data": {...}, "analysis_result": {...}}, ...]
+            benchmarks: Optional dictionary containing benchmark data
                 
         Returns:
             Tuple[int, int]: (success_count, error_count)
@@ -1172,6 +1172,11 @@ class SheetsManager:
         # Format the data according to new specifications
         formatted_ads = self.formatter.format_ad_data_for_sheets(ads_data)
         sheets_ready_ads = self.formatter.create_sheets_formulas(formatted_ads)
+        
+        # Create benchmark row if benchmark data is provided
+        if benchmarks:
+            benchmark_row = self.formatter.create_benchmark_row(benchmarks)
+            sheets_ready_ads.insert(0, benchmark_row)
         
         # No longer exporting to CSV - Google Sheets only
         
@@ -1185,6 +1190,9 @@ class SheetsManager:
         try:
             # Format data for sheets API
             rows_data = self.formatter.format_for_sheets_api(sheets_ready_ads)
+            
+            # Check if we have a benchmark row to apply special formatting
+            has_benchmark_row = any(ad.get("is_benchmark", False) for ad in sheets_ready_ads)
             
             # Get sheet ID for this tab
             sheet_id = self._get_sheet_id(ad_details_tab)
@@ -1235,6 +1243,10 @@ class SheetsManager:
                 body=body
             ).execute()
             
+            # Apply benchmark row formatting if needed
+            if has_benchmark_row:
+                self._apply_benchmark_row_formatting(sheet_id, next_row)
+            
             success_count = len(sheets_ready_ads)
             logger.info(f"Ad details batch update complete: {success_count} ads updated")
             
@@ -1275,6 +1287,9 @@ class SheetsManager:
             sheet_id: Sheet ID to format
             row_count: Number of new data rows to format
         """
+        # Special formatting for benchmark row
+        if row_count > 0:
+            self._apply_benchmark_row_formatting(sheet_id, next_row=2)  # Apply to first data row (after header)
         # Get the starting row for new data
         current_data_range = f"!A:A"  # Just look at column A to count rows
         result = self.service.spreadsheets().get(
@@ -1320,40 +1335,9 @@ class SheetsManager:
                 }
             })
             
-            # Make Demographics and Placements columns wider
-            requests.append({
-                'updateDimensionProperties': {
-                    'range': {
-                        'sheetId': sheet_id,
-                        'dimension': 'COLUMNS',
-                        'startIndex': 6,  # Demographics
-                        'endIndex': 7     # Through Placements
-                    },
-                    'properties': {'pixelSize': 300},
-                    'fields': 'pixelSize'
-                }
-            })
+            # Demographics and Placements columns have been removed
             
-            # Apply text wrapping to Demographics and Placements
-            requests.append({
-                'repeatCell': {
-                    'range': {
-                        'sheetId': sheet_id,
-                        'startRowIndex': 1,
-                        'endRowIndex': row_count + 1,
-                        'startColumnIndex': 6,
-                        'endColumnIndex': 7
-                    },
-                    'cell': {
-                        'userEnteredFormat': {
-                            'wrapStrategy': 'WRAP',
-                            'verticalAlignment': 'MIDDLE',
-                            'horizontalAlignment': 'LEFT'
-                        }
-                    },
-                    'fields': 'userEnteredFormat(wrapStrategy,verticalAlignment,horizontalAlignment)'
-                }
-            })
+            # Text wrapping for Demographics and Placements has been removed
             
             # Apply formatting for CPR column with mixed bold/regular text
             # Note: This can't be done directly in batch update - 
@@ -1560,6 +1544,56 @@ class SheetsManager:
         except Exception as e:
             logger.exception(f"Failed to apply special formatting: {str(e)}")
 
+
+    def _apply_benchmark_row_formatting(self, sheet_id: int, next_row: int) -> None:
+        """
+        Apply special formatting for benchmark rows
+        
+        Args:
+            sheet_id: Sheet ID to format
+            next_row: Row index for the benchmark row (1-based)
+        """
+        try:
+            # Format the benchmark row with light green background and bold text
+            requests = [
+                # Apply light green background to the entire row
+                {
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': sheet_id,
+                            'startRowIndex': next_row - 1,  # Convert to 0-based index
+                            'endRowIndex': next_row,  # End is exclusive
+                            'startColumnIndex': 0,
+                            'endColumnIndex': 12  # Cover all columns
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'backgroundColor': {
+                                    'red': 0.7176,
+                                    'green': 0.8823,
+                                    'blue': 0.7176  # Light green 3 color
+                                },
+                                'textFormat': {
+                                    'bold': True  # Make text bold
+                                }
+                            }
+                        },
+                        'fields': 'userEnteredFormat(backgroundColor,textFormat)'
+                    }
+                }
+            ]
+            
+            # Execute the formatting request
+            body = {'requests': requests}
+            self.service.spreadsheets().batchUpdate(
+                spreadsheetId=self.spreadsheet_id,
+                body=body
+            ).execute()
+            
+            logger.info(f"Applied special formatting to benchmark row")
+            
+        except Exception as e:
+            logger.exception(f"Failed to apply benchmark row formatting: {str(e)}")
 
 # Example usage
 if __name__ == "__main__":

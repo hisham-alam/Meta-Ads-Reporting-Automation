@@ -533,12 +533,12 @@ class PipelineManager:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             json_file_path = os.path.join(OUTPUT_DIR, f'ad_analysis_{region}_{timestamp}.json')
             
-            # Filter out unwanted fields before saving
-            filtered_analyzed_ads = self._filter_fields_for_json(analyzed_ads)
+            # Filter out unwanted fields and add benchmarks at the top before saving
+            filtered_output = self._filter_fields_for_json(analyzed_ads)
             
             try:
                 with open(json_file_path, 'w') as f:
-                    json.dump(filtered_analyzed_ads, f, indent=2, default=str)
+                    json.dump(filtered_output, f, indent=2, default=str)
                 print(f"✓ Analysis saved: {os.path.basename(json_file_path)}")
             except Exception as e:
                 print(f"✗ Error saving results: {str(e)}")
@@ -547,8 +547,11 @@ class PipelineManager:
             print("✓ Updating Google Sheets")
             
             try:
-                # Update individual ad details
-                sheets_results = self.sheets_manager.update_ad_details_batch(analyzed_ads)
+                # Pass benchmarks and analyzed ads to sheets manager
+                sheets_results = self.sheets_manager.update_ad_details_batch(
+                    analyzed_ads, 
+                    benchmarks=self.analyzer.get_benchmarks()
+                )
                 print(f"✓ Ad Details tab updated ({len(analyzed_ads)} ads)")
                 
                 # Prepare summary data for dashboard
@@ -625,16 +628,25 @@ class PipelineManager:
         
         return run_stats
     
-    def _filter_fields_for_json(self, analyzed_ads: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _filter_fields_for_json(self, analyzed_ads: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Filter out unwanted fields from the analyzed ads before saving to JSON
+        Filter out unwanted fields from the analyzed ads before saving to JSON and add benchmarks at the top
         
         Args:
             analyzed_ads: List of analyzed ad data and results
             
         Returns:
-            List[Dict]: Filtered ad data without unwanted fields
+            Dict[str, Any]: JSON output with benchmarks at the top and filtered ads data
         """
+        # Get benchmarks to include at the top of the JSON output
+        benchmarks = self.analyzer.get_benchmarks()
+        
+        # Prepare the output structure with benchmarks at the top
+        output = {
+            "benchmarks": benchmarks,
+            "ads": []
+        }
+        
         filtered_ads = []
         
         # Metrics fields to remove
@@ -768,13 +780,13 @@ class PipelineManager:
                                 # If no video object, fall back to direct metrics
                                 # Hook Rate calculation
                                 if 'video_3_sec_views' in breakdown and breakdown['video_3_sec_views'] > 0:
-                                    breakdown['hook_rate'] = (breakdown['video_3_sec_views'] / breakdown['impressions']) * 100
+                                    breakdown['hook_rate'] = round((breakdown['video_3_sec_views'] / breakdown['impressions']) * 100, 2)
                                 else:
                                     breakdown['hook_rate'] = 0
                                     
                                 # Viewthrough Rate calculation
                                 if 'video_p100_watched' in breakdown and breakdown['video_p100_watched'] > 0:
-                                    breakdown['viewthrough_rate'] = (breakdown['video_p100_watched'] / breakdown['impressions']) * 100
+                                    breakdown['viewthrough_rate'] = round((breakdown['video_p100_watched'] / breakdown['impressions']) * 100, 2)
                                 else:
                                     breakdown['viewthrough_rate'] = 0
                         
@@ -813,13 +825,13 @@ class PipelineManager:
                                 # If no video object, fall back to direct metrics
                                 # Hook Rate calculation
                                 if 'video_3_sec_views' in breakdown and breakdown['video_3_sec_views'] > 0:
-                                    breakdown['hook_rate'] = (breakdown['video_3_sec_views'] / breakdown['impressions']) * 100
+                                    breakdown['hook_rate'] = round((breakdown['video_3_sec_views'] / breakdown['impressions']) * 100, 2)
                                 else:
                                     breakdown['hook_rate'] = 0
                                     
                                 # Viewthrough Rate calculation
                                 if 'video_p100_watched' in breakdown and breakdown['video_p100_watched'] > 0:
-                                    breakdown['viewthrough_rate'] = (breakdown['video_p100_watched'] / breakdown['impressions']) * 100
+                                    breakdown['viewthrough_rate'] = round((breakdown['video_p100_watched'] / breakdown['impressions']) * 100, 2)
                                 else:
                                     breakdown['viewthrough_rate'] = 0
                         
@@ -869,7 +881,10 @@ class PipelineManager:
             
             filtered_ads.append(filtered_ad)
         
-        return filtered_ads
+        # Add filtered ads to the output structure
+        output["ads"] = filtered_ads
+        
+        return output
         
     def _ensure_required_metrics(self, ad_data: Dict[str, Any]) -> None:
         """
@@ -932,7 +947,7 @@ class PipelineManager:
             # Calculate click_to_reg if not present but we have the required data
             if 'click_to_reg' not in metrics and 'clicks' in metrics and metrics['clicks'] > 0:
                 if 'conversions' in metrics and metrics['conversions'] > 0:
-                    metrics['click_to_reg'] = (metrics['conversions'] / metrics['clicks']) * 100
+                    metrics['click_to_reg'] = round((metrics['conversions'] / metrics['clicks']) * 100, 2)
                 else:
                     metrics['click_to_reg'] = 0
                     
@@ -990,7 +1005,7 @@ class PipelineManager:
                     # Calculate click_to_reg if not present but we have the required data
                     if 'click_to_reg' not in breakdown and 'clicks' in breakdown and breakdown['clicks'] > 0:
                         if 'conversions' in breakdown and breakdown['conversions'] > 0:
-                            breakdown['click_to_reg'] = (breakdown['conversions'] / breakdown['clicks']) * 100
+                            breakdown['click_to_reg'] = round((breakdown['conversions'] / breakdown['clicks']) * 100, 2)
                         else:
                             breakdown['click_to_reg'] = 0
                     
@@ -1046,7 +1061,7 @@ class PipelineManager:
                     # Calculate click_to_reg if not present but we have the required data
                     if 'click_to_reg' not in breakdown and 'clicks' in breakdown and breakdown['clicks'] > 0:
                         if 'conversions' in breakdown and breakdown['conversions'] > 0:
-                            breakdown['click_to_reg'] = (breakdown['conversions'] / breakdown['clicks']) * 100
+                            breakdown['click_to_reg'] = round((breakdown['conversions'] / breakdown['clicks']) * 100, 2)
                         else:
                             breakdown['click_to_reg'] = 0
                     

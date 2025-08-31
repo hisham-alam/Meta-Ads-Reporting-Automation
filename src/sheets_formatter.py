@@ -93,11 +93,7 @@ class SheetsFormatter:
             # Remove percentage change calculation as it's no longer needed
             cpr_percent_change = 0  # Set to 0 for backward compatibility
             
-            # Leave demographics blank as they will be filled by a separate AI script
-            demographics = []
-            
-            # Leave placements blank as they will be filled by a separate AI script
-            placements = []
+            # Demographics and Placements columns have been removed
             
             # Extract more metrics from the data
             spend = metrics.get("spend", 0)  # Ad spend
@@ -174,9 +170,7 @@ class SheetsFormatter:
                 "viewthrough_rate": viewthrough_rate,
                 "ctr_destination": ctr_destination,
                 "cpr_value": cpr_value,
-                "cpr_percent_change": cpr_percent_change,
-                "demographics": demographics,
-                "placements": placements
+                "cpr_percent_change": cpr_percent_change
             }
             
             formatted_ads.append(formatted_ad)
@@ -204,10 +198,6 @@ class SheetsFormatter:
             
             # Format CPR value (use cpa value if cpr_value doesn't exist)
             cpr_value = ad.get("cpr_value", 0) or ad.get("cpa", 0)
-            
-            # Leave demographics and placements sections blank
-            demographics_str = ""
-            placements_str = ""
             
             # Create sheets-ready ad entry
             sheets_ad = ad.copy()
@@ -253,9 +243,6 @@ class SheetsFormatter:
             # Leave blank when value is 0%
             sheets_ad["hook_rate_formatted"] = f"{hook_rate:.2f}%" if hook_rate and hook_rate > 0 else ""
             sheets_ad["viewthrough_rate_formatted"] = f"{viewthrough_rate:.2f}%" if viewthrough_rate and viewthrough_rate > 0 else ""
-            
-            sheets_ad["demographics_formatted"] = demographics_str
-            sheets_ad["placements_formatted"] = placements_str
             
             sheets_ready_ads.append(sheets_ad)
         
@@ -311,12 +298,7 @@ class SheetsFormatter:
         # Create DataFrame from formatted ads
         df = pd.DataFrame(csv_ready_ads)
         
-        # Leave demographics and placements blank in CSV
-        if "demographics" in df.columns:
-            df["demographics"] = ""
-            
-        if "placements" in df.columns:
-            df["placements"] = ""
+        # Demographics and placements columns have been removed
         
         # Create output filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -332,6 +314,92 @@ class SheetsFormatter:
         
         return output_path
     
+    def create_benchmark_row(self, benchmarks: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Create a benchmark row for the Google Sheets output
+        
+        Args:
+            benchmarks: Dictionary containing benchmark data
+            
+        Returns:
+            Dict: Formatted benchmark row ready for Google Sheets
+        """
+        # Get the benchmark date in the required format
+        benchmark_date = benchmarks.get("benchmark_date", datetime.now().strftime('%d/%m/%Y'))
+        
+        # Get the benchmark metrics
+        benchmark_metrics = benchmarks.get("benchmarks", {})
+        
+        # Create a benchmark row with the correct format for each column
+        benchmark_row = {
+            # Column: "Launch Date" - set to benchmark date
+            "launched": benchmark_date,
+            
+            # Column: "Ad Name" - set to "BENCHMARKS dd/mm/yyyy"
+            "ad_name": f"BENCHMARKS {benchmark_date}",
+            
+            # Use empty strings for columns that don't apply to benchmarks
+            "ad_link": "",
+            "status": "",
+            "action": "",
+            
+            # Column: "Spend" - set to "-" (as per requirements)
+            "spend": "-",
+            
+            # Add all benchmark metrics
+            "cpm": benchmark_metrics.get("cpm", 0),
+            "hook_rate": benchmark_metrics.get("hook_rate", 0),
+            "viewthrough_rate": benchmark_metrics.get("viewthrough_rate", 0),
+            "ctr": benchmark_metrics.get("ctr", 0),
+            "cpc": benchmark_metrics.get("cpc", 0),
+            "click_to_reg": benchmark_metrics.get("click_to_reg", 0),
+            "cpr_value": benchmark_metrics.get("cpa", 0),  # Use CPA as CPR for benchmarks
+            
+            # Add any other metrics needed
+            "impressions": 0,
+            "clicks": 0,
+            "conversions": 0,
+            "ctr_destination": 0,
+            "cpr_percent_change": 0,
+            
+            # Specify this is a benchmark row for special formatting
+            "is_benchmark": True
+        }
+        
+        # Format the benchmark values for display
+        formatted_benchmark = benchmark_row.copy()
+        
+        # Format CPM
+        formatted_benchmark["cpm_formatted"] = f"£{benchmark_metrics.get('cpm', 0):.2f}"
+        
+        # Format CPC
+        formatted_benchmark["cpc_formatted"] = f"£{benchmark_metrics.get('cpc', 0):.2f}"
+        
+        # Format CPR (using CPA value)
+        formatted_benchmark["cpr_formatted"] = f"£{benchmark_metrics.get('cpa', 0):.2f}"
+        
+        # Format percentage metrics
+        # Use 0 if the metric doesn't exist in the benchmarks
+        hook_rate = benchmark_metrics.get("hook_rate", 0)
+        formatted_benchmark["hook_rate_formatted"] = f"{hook_rate:.2f}%" if hook_rate > 0 else ""
+        
+        viewthrough_rate = benchmark_metrics.get("viewthrough_rate", 0)
+        formatted_benchmark["viewthrough_rate_formatted"] = f"{viewthrough_rate:.2f}%" if viewthrough_rate > 0 else ""
+        
+        ctr = benchmark_metrics.get("ctr", 0)
+        formatted_benchmark["ctr_formatted"] = f"{ctr:.2f}%"
+        
+        click_to_reg = benchmark_metrics.get("click_to_reg", 0)
+        formatted_benchmark["click_to_reg_formatted"] = f"{click_to_reg:.2f}%" if click_to_reg > 0 else ""
+        
+        # Create the ad name formula with proper bold formatting
+        formatted_benchmark["ad_name_formula"] = f"BENCHMARKS {benchmark_date}"
+        
+        # Set the spend formatted field to "-" as required
+        formatted_benchmark["spend_formatted"] = "-"
+        
+        return formatted_benchmark
+    
     def format_for_sheets_api(self, sheets_ready_ads: List[Dict[str, Any]]) -> List[List[Any]]:
         """
         Format ads data into a 2D array format for the Google Sheets API
@@ -346,8 +414,7 @@ class SheetsFormatter:
         columns = [
             "launched", "ad_name_formula", "status", 
             "action", "spend_formatted", "cpm_formatted", "hook_rate_formatted",
-            "viewthrough_rate_formatted", "ctr_formatted", "cpc_formatted", "click_to_reg_formatted", "cpr_formatted", 
-            "demographics_formatted", "placements_formatted"
+            "viewthrough_rate_formatted", "ctr_formatted", "cpc_formatted", "click_to_reg_formatted", "cpr_formatted"
         ]
         
         # Create 2D array
@@ -357,8 +424,7 @@ class SheetsFormatter:
         headers = [
             "Launch Date", "Ad Name", "Status", 
             "Action", "Spend", "CPM", "Hook Rate", 
-            "VT Rate", "CTR", "CPC", "Click to Reg", "CPR", 
-            "Demographics", "Placements"
+            "VT Rate", "CTR", "CPC", "Click to Reg", "CPR"
         ]
         rows.append(headers)
         

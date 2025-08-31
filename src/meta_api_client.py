@@ -1930,35 +1930,42 @@ class MetaApiClient:
                             
             # Calculate derived metrics
             if aggregated['impressions'] > 0:
-                aggregated['ctr'] = (aggregated['clicks'] / aggregated['impressions'])
-                aggregated['cpm'] = (aggregated['spend'] / aggregated['impressions']) * 1000
+                # Multiply by 100 to make it a percentage like the Meta API returns for individual ads
+                aggregated['ctr'] = round((aggregated['clicks'] / aggregated['impressions']) * 100, 2)
+                aggregated['cpm'] = round((aggregated['spend'] / aggregated['impressions']) * 1000, 2)
                 
                 # Calculate CTR destination
                 if aggregated['outbound_clicks'] > 0:
-                    aggregated['ctr_destination'] = (aggregated['outbound_clicks'] / aggregated['impressions'])
+                    aggregated['ctr_destination'] = round((aggregated['outbound_clicks'] / aggregated['impressions']), 2)
                     
                 # Calculate video metrics rates
                 if aggregated['video_3_sec_views'] > 0:
-                    aggregated['hook_rate'] = (aggregated['video_3_sec_views'] / aggregated['impressions']) * 100
+                    aggregated['hook_rate'] = round((aggregated['video_3_sec_views'] / aggregated['impressions']) * 100, 2)
                     
                     # Calculate viewthrough rate
                     if aggregated['video_p100_watched'] > 0:
-                        aggregated['viewthrough_rate'] = (aggregated['video_p100_watched'] / aggregated['impressions']) * 100
+                        aggregated['viewthrough_rate'] = round((aggregated['video_p100_watched'] / aggregated['impressions']) * 100, 2)
                         
             # Calculate frequency
             if aggregated['reach'] > 0:
-                aggregated['frequency'] = aggregated['impressions'] / aggregated['reach']
+                aggregated['frequency'] = round(aggregated['impressions'] / aggregated['reach'], 2)
                 
             # Calculate cost per conversion
             if aggregated['conversions'] > 0:
-                aggregated['cost_per_conversion'] = aggregated['spend'] / aggregated['conversions']
+                aggregated['cost_per_conversion'] = round(aggregated['spend'] / aggregated['conversions'], 2)
                 
             # Add some extra useful metrics
             if aggregated['clicks'] > 0:
-                aggregated['cpc'] = aggregated['spend'] / aggregated['clicks']
+                aggregated['cpc'] = round(aggregated['spend'] / aggregated['clicks'], 2)
                 
             if aggregated['conversions'] > 0:
-                aggregated['cpr'] = aggregated['spend'] / aggregated['conversions']
+                aggregated['cpr'] = round(aggregated['spend'] / aggregated['conversions'], 2)
+                
+            # Calculate click_to_reg ratio (conversion / clicks)
+            if aggregated['clicks'] > 0 and aggregated['conversions'] > 0:
+                aggregated['click_to_reg'] = round((aggregated['conversions'] / aggregated['clicks']) * 100, 2)
+            else:
+                aggregated['click_to_reg'] = 0
                 
             logger.info(f"Successfully aggregated account metrics over {days} days")
             return aggregated
@@ -1966,6 +1973,300 @@ class MetaApiClient:
         except Exception as e:
             logger.exception(f"Error retrieving account insights: {str(e)}")
             raise
+    
+    def get_campaign_insights(self, campaign_id: str, days: int = 30) -> Dict[str, Any]:
+        """
+        Get aggregated campaign-level metrics over a specified time period
+        
+        Args:
+            campaign_id: Meta Campaign ID
+            days: Number of days to analyze
+            
+        Returns:
+            Dict: Aggregated metrics at the campaign level
+        """
+        logger.info(f"Getting campaign-level insights for campaign {campaign_id} for the past {days} days")
+        
+        # Calculate date range
+        today = datetime.now()
+        since_date = today - timedelta(days=days)
+        
+        # Format dates for API (YYYY-MM-DD format)
+        since_date_str = since_date.strftime('%Y-%m-%d')
+        today_str = today.strftime('%Y-%m-%d')
+        
+        # Build URL and params for campaign insights
+        url = f"{self.base_url}/{campaign_id}/insights"
+        params = {
+            "access_token": self.access_token,
+            "fields": "spend,impressions,clicks,ctr,cpm,cost_per_inline_link_click,"
+                     "inline_link_click_ctr,frequency,reach,video_thruplay_watched_actions,"
+                     "video_p100_watched_actions,actions,cost_per_action_type,conversions,"
+                     "conversion_rate_ranking,outbound_clicks,outbound_clicks_ctr",
+            "time_range": json.dumps({
+                "since": since_date_str,
+                "until": today_str
+            }),
+            "level": "campaign",  # Get aggregated campaign metrics
+            "time_increment": 1,  # Daily breakdown
+            "limit": 100  # Should be enough for daily metrics
+        }
+        
+        try:
+            # This may return data with multiple days (time_increment=1)
+            all_days_data = self._handle_pagination(url, params)
+            
+            if not all_days_data:
+                logger.warning(f"No insights data found for campaign {campaign_id}")
+                return {}
+                
+            # Aggregate metrics across all days
+            logger.info(f"Retrieved data for {len(all_days_data)} days")
+            
+            # Initialize aggregated metrics
+            aggregated = {
+                "spend": 0.0,
+                "impressions": 0,
+                "clicks": 0,
+                "ctr": 0.0,
+                "cpm": 0.0,
+                "frequency": 0.0,
+                "reach": 0,
+                "conversions": 0,
+                "video_3_sec_views": 0,
+                "video_p100_watched": 0,
+                "outbound_clicks": 0,
+                "ctr_destination": 0.0,
+                "cost_per_conversion": 0.0,
+            }
+            
+            # Sum up metrics across all days
+            for day_data in all_days_data:
+                # Basic metrics
+                aggregated['spend'] += float(day_data.get('spend', 0))
+                aggregated['impressions'] += int(day_data.get('impressions', 0))
+                aggregated['clicks'] += int(day_data.get('clicks', 0))
+                aggregated['reach'] += int(day_data.get('reach', 0))
+                
+                # Handle outbound_clicks (for destination CTR)
+                outbound_clicks = day_data.get('outbound_clicks', [])
+                if outbound_clicks and isinstance(outbound_clicks, list):
+                    for item in outbound_clicks:
+                        if isinstance(item, dict) and 'value' in item:
+                            aggregated['outbound_clicks'] += int(float(item.get('value', 0)))
+                
+                # Handle video metrics
+                video_thruplay = day_data.get('video_thruplay_watched_actions', [])
+                if video_thruplay:
+                    for action in video_thruplay:
+                        if action.get('action_type') == 'video_view':
+                            aggregated['video_3_sec_views'] += int(action.get('value', 0))
+                            
+                video_p100 = day_data.get('video_p100_watched_actions', [])
+                if video_p100:
+                    for action in video_p100:
+                        if action.get('action_type') == 'video_view':
+                            aggregated['video_p100_watched'] += int(action.get('value', 0))
+                
+                # Handle conversions
+                conversions = day_data.get('conversions', [])
+                if conversions and isinstance(conversions, list):
+                    for conv in conversions:
+                        if isinstance(conv, dict) and 'value' in conv:
+                            aggregated['conversions'] += int(float(conv.get('value', 0)))
+                            
+            # Calculate derived metrics
+            if aggregated['impressions'] > 0:
+                # Multiply by 100 to make it a percentage like the Meta API returns for individual ads
+                aggregated['ctr'] = round((aggregated['clicks'] / aggregated['impressions']) * 100, 2)
+                aggregated['cpm'] = round((aggregated['spend'] / aggregated['impressions']) * 1000, 2)
+                
+                # Calculate CTR destination
+                if aggregated['outbound_clicks'] > 0:
+                    aggregated['ctr_destination'] = round((aggregated['outbound_clicks'] / aggregated['impressions']), 2)
+                    
+                # Calculate video metrics rates
+                if aggregated['video_3_sec_views'] > 0:
+                    aggregated['hook_rate'] = round((aggregated['video_3_sec_views'] / aggregated['impressions']) * 100, 2)
+                    
+                    # Calculate viewthrough rate
+                    if aggregated['video_p100_watched'] > 0:
+                        aggregated['viewthrough_rate'] = round((aggregated['video_p100_watched'] / aggregated['impressions']) * 100, 2)
+                        
+            # Calculate frequency
+            if aggregated['reach'] > 0:
+                aggregated['frequency'] = round(aggregated['impressions'] / aggregated['reach'], 2)
+                
+            # Calculate cost per conversion
+            if aggregated['conversions'] > 0:
+                aggregated['cost_per_conversion'] = round(aggregated['spend'] / aggregated['conversions'], 2)
+                
+            # Add some extra useful metrics
+            if aggregated['clicks'] > 0:
+                aggregated['cpc'] = round(aggregated['spend'] / aggregated['clicks'], 2)
+                
+            if aggregated['conversions'] > 0:
+                aggregated['cpr'] = round(aggregated['spend'] / aggregated['conversions'], 2)
+                
+            # Calculate click_to_reg ratio (conversion / clicks)
+            if aggregated['clicks'] > 0 and aggregated['conversions'] > 0:
+                aggregated['click_to_reg'] = round((aggregated['conversions'] / aggregated['clicks']) * 100, 2)
+            else:
+                aggregated['click_to_reg'] = 0
+                
+            logger.info(f"Successfully aggregated campaign metrics for {campaign_id} over {days} days")
+            return aggregated
+            
+        except Exception as e:
+            logger.exception(f"Error retrieving campaign insights: {str(e)}")
+            return {}
+            
+    def get_adset_insights(self, adset_id: str, days: int = 30) -> Dict[str, Any]:
+        """
+        Get aggregated adset-level metrics over a specified time period
+        
+        Args:
+            adset_id: Meta Ad Set ID
+            days: Number of days to analyze
+            
+        Returns:
+            Dict: Aggregated metrics at the adset level
+        """
+        logger.info(f"Getting adset-level insights for adset {adset_id} for the past {days} days")
+        
+        # Calculate date range
+        today = datetime.now()
+        since_date = today - timedelta(days=days)
+        
+        # Format dates for API (YYYY-MM-DD format)
+        since_date_str = since_date.strftime('%Y-%m-%d')
+        today_str = today.strftime('%Y-%m-%d')
+        
+        # Build URL and params for adset insights
+        url = f"{self.base_url}/{adset_id}/insights"
+        params = {
+            "access_token": self.access_token,
+            "fields": "spend,impressions,clicks,ctr,cpm,cost_per_inline_link_click,"
+                     "inline_link_click_ctr,frequency,reach,video_thruplay_watched_actions,"
+                     "video_p100_watched_actions,actions,cost_per_action_type,conversions,"
+                     "conversion_rate_ranking,outbound_clicks,outbound_clicks_ctr",
+            "time_range": json.dumps({
+                "since": since_date_str,
+                "until": today_str
+            }),
+            "level": "adset",  # Get aggregated adset metrics
+            "time_increment": 1,  # Daily breakdown
+            "limit": 100  # Should be enough for daily metrics
+        }
+        
+        try:
+            # This may return data with multiple days (time_increment=1)
+            all_days_data = self._handle_pagination(url, params)
+            
+            if not all_days_data:
+                logger.warning(f"No insights data found for adset {adset_id}")
+                return {}
+                
+            # Aggregate metrics across all days
+            logger.info(f"Retrieved data for {len(all_days_data)} days")
+            
+            # Initialize aggregated metrics
+            aggregated = {
+                "spend": 0.0,
+                "impressions": 0,
+                "clicks": 0,
+                "ctr": 0.0,
+                "cpm": 0.0,
+                "frequency": 0.0,
+                "reach": 0,
+                "conversions": 0,
+                "video_3_sec_views": 0,
+                "video_p100_watched": 0,
+                "outbound_clicks": 0,
+                "ctr_destination": 0.0,
+                "cost_per_conversion": 0.0,
+            }
+            
+            # Sum up metrics across all days
+            for day_data in all_days_data:
+                # Basic metrics
+                aggregated['spend'] += float(day_data.get('spend', 0))
+                aggregated['impressions'] += int(day_data.get('impressions', 0))
+                aggregated['clicks'] += int(day_data.get('clicks', 0))
+                aggregated['reach'] += int(day_data.get('reach', 0))
+                
+                # Handle outbound_clicks (for destination CTR)
+                outbound_clicks = day_data.get('outbound_clicks', [])
+                if outbound_clicks and isinstance(outbound_clicks, list):
+                    for item in outbound_clicks:
+                        if isinstance(item, dict) and 'value' in item:
+                            aggregated['outbound_clicks'] += int(float(item.get('value', 0)))
+                
+                # Handle video metrics
+                video_thruplay = day_data.get('video_thruplay_watched_actions', [])
+                if video_thruplay:
+                    for action in video_thruplay:
+                        if action.get('action_type') == 'video_view':
+                            aggregated['video_3_sec_views'] += int(action.get('value', 0))
+                            
+                video_p100 = day_data.get('video_p100_watched_actions', [])
+                if video_p100:
+                    for action in video_p100:
+                        if action.get('action_type') == 'video_view':
+                            aggregated['video_p100_watched'] += int(action.get('value', 0))
+                
+                # Handle conversions
+                conversions = day_data.get('conversions', [])
+                if conversions and isinstance(conversions, list):
+                    for conv in conversions:
+                        if isinstance(conv, dict) and 'value' in conv:
+                            aggregated['conversions'] += int(float(conv.get('value', 0)))
+                            
+            # Calculate derived metrics
+            if aggregated['impressions'] > 0:
+                # Multiply by 100 to make it a percentage like the Meta API returns for individual ads
+                aggregated['ctr'] = round((aggregated['clicks'] / aggregated['impressions']) * 100, 2)
+                aggregated['cpm'] = round((aggregated['spend'] / aggregated['impressions']) * 1000, 2)
+                
+                # Calculate CTR destination
+                if aggregated['outbound_clicks'] > 0:
+                    aggregated['ctr_destination'] = round((aggregated['outbound_clicks'] / aggregated['impressions']), 2)
+                    
+                # Calculate video metrics rates
+                if aggregated['video_3_sec_views'] > 0:
+                    aggregated['hook_rate'] = round((aggregated['video_3_sec_views'] / aggregated['impressions']) * 100, 2)
+                    
+                    # Calculate viewthrough rate
+                    if aggregated['video_p100_watched'] > 0:
+                        aggregated['viewthrough_rate'] = round((aggregated['video_p100_watched'] / aggregated['impressions']) * 100, 2)
+                        
+            # Calculate frequency
+            if aggregated['reach'] > 0:
+                aggregated['frequency'] = round(aggregated['impressions'] / aggregated['reach'], 2)
+                
+            # Calculate cost per conversion
+            if aggregated['conversions'] > 0:
+                aggregated['cost_per_conversion'] = round(aggregated['spend'] / aggregated['conversions'], 2)
+                
+            # Add some extra useful metrics
+            if aggregated['clicks'] > 0:
+                aggregated['cpc'] = round(aggregated['spend'] / aggregated['clicks'], 2)
+                
+            if aggregated['conversions'] > 0:
+                aggregated['cpr'] = round(aggregated['spend'] / aggregated['conversions'], 2)
+                
+            # Calculate click_to_reg ratio (conversion / clicks)
+            if aggregated['clicks'] > 0 and aggregated['conversions'] > 0:
+                aggregated['click_to_reg'] = round((aggregated['conversions'] / aggregated['clicks']) * 100, 2)
+            else:
+                aggregated['click_to_reg'] = 0
+                
+            logger.info(f"Successfully aggregated adset metrics for {adset_id} over {days} days")
+            return aggregated
+            
+        except Exception as e:
+            logger.exception(f"Error retrieving adset insights: {str(e)}")
+            return {}
 
 
     def find_eligible_ads(self, days: int = DAYS_THRESHOLD, min_spend: float = SPEND_THRESHOLD, 

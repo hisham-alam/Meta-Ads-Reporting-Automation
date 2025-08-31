@@ -37,6 +37,11 @@ try:
     SPECIFIC_ADSET_IDS = ACCOUNT_FILTERS.get('specific_adset_ids', [])
     SPECIFIC_CAMPAIGN_IDS = ACCOUNT_FILTERS.get('specific_campaign_ids', [])
     
+    # Benchmark configuration
+    BENCHMARK_CONFIG = ANALYSIS_CONFIG.get('benchmarking', {})
+    BENCHMARK_CAMPAIGN_ID = BENCHMARK_CONFIG.get('specific_campaign_id', '')
+    BENCHMARK_ADSET_ID = BENCHMARK_CONFIG.get('specific_adset_id', '')
+    
 except (FileNotFoundError, json.JSONDecodeError) as e:
     print(f"Error loading analysis configuration: {e}")
     # Default values if configuration file is missing or invalid
@@ -44,6 +49,9 @@ except (FileNotFoundError, json.JSONDecodeError) as e:
     SPEND_THRESHOLD = 250.0
     ENABLED_ACCOUNTS = ['GBR']
     SPECIFIC_ADSET_IDS = []
+    SPECIFIC_CAMPAIGN_IDS = []
+    BENCHMARK_CAMPAIGN_ID = ''
+    BENCHMARK_ADSET_ID = ''
 
 # Meta API Settings
 META_ACCESS_TOKEN = os.getenv('META_ACCESS_TOKEN', '')

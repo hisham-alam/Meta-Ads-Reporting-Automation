@@ -14,7 +14,7 @@ from typing import Dict, List, Any, Tuple, Optional
 from pathlib import Path
 
 # Import settings from config
-from config.settings import DAYS_THRESHOLD
+from config.settings import DAYS_THRESHOLD, BENCHMARK_CAMPAIGN_ID, BENCHMARK_ADSET_ID
 
 # Configure logging
 logging.basicConfig(
@@ -39,7 +39,7 @@ class PerformanceAnalyzer:
     
     def calculate_benchmarks(self, meta_client=None, days=DAYS_THRESHOLD):
         """
-        Calculate benchmarks from actual Meta account data
+        Calculate benchmarks from Meta data based on configuration
         
         Args:
             meta_client: Meta API client instance (uses instance from init if None)
@@ -56,31 +56,55 @@ class PerformanceAnalyzer:
             # We need to return some minimal structure for the analyzer to function
             return {
                 "market": "Unknown",
-                "benchmarks": {}
+                "benchmarks": {},
+                "benchmark_date": datetime.now().strftime('%d/%m/%Y')
             }
             
-        logger.info(f"Calculating benchmarks from account data over past {days} days")
+        # Determine which data source to use for benchmarks based on configuration
+        if BENCHMARK_CAMPAIGN_ID:
+            logger.info(f"Calculating benchmarks from campaign {BENCHMARK_CAMPAIGN_ID} over past {days} days")
+            insights = client.get_campaign_insights(BENCHMARK_CAMPAIGN_ID, days=days)
+            source_type = "campaign"
+            source_id = BENCHMARK_CAMPAIGN_ID
+        elif BENCHMARK_ADSET_ID:
+            logger.info(f"Calculating benchmarks from ad set {BENCHMARK_ADSET_ID} over past {days} days")
+            insights = client.get_adset_insights(BENCHMARK_ADSET_ID, days=days)
+            source_type = "adset"
+            source_id = BENCHMARK_ADSET_ID
+        else:
+            # Fallback to account-level data if no specific sources configured
+            logger.info(f"Calculating benchmarks from account data over past {days} days")
+            insights = client.get_account_insights(days=days)
+            source_type = "account"
+            source_id = "all"
         
         try:
-            # Get account-level metrics for benchmarks
-            account_insights = client.get_account_insights(days=days)
-            
-            if not account_insights:
-                logger.warning("No account insights available for benchmarking")
-                return {"market": "Unknown", "benchmarks": {}}
+            if not insights:
+                logger.warning("No insights available for benchmarking")
+                return {
+                    "market": client.region,
+                    "benchmarks": {},
+                    "benchmark_date": datetime.now().strftime('%d/%m/%Y'),
+                    "source_type": source_type,
+                    "source_id": source_id
+                }
                 
             # Extract key metrics for benchmarking
             benchmarks = {
                 "market": client.region,
+                "benchmark_date": datetime.now().strftime('%d/%m/%Y'),
+                "source_type": source_type,
+                "source_id": source_id,
                 "benchmarks": {
-                    # Extract metrics that exist in the account data
-                    "ctr": account_insights.get("ctr", 0),
-                    "cpm": account_insights.get("cpm", 0),
-                    "cpa": account_insights.get("cost_per_conversion", 0),
-                    "roas": account_insights.get("roas", 0),
-                    "conversion_rate": account_insights.get("conversion_rate", 0),
-                    "hook_rate": account_insights.get("hook_rate", 0),
-                    "viewthrough_rate": account_insights.get("viewthrough_rate", 0)
+                    # Extract only needed metrics
+                    # CTR is already a percentage from Meta API
+                    "ctr": round(insights.get("ctr", 0), 2),
+                    "cpm": round(insights.get("cpm", 0), 2),
+                    "cpa": round(insights.get("cost_per_conversion", 0), 2),
+                    "hook_rate": round(insights.get("hook_rate", 0), 2),
+                    "viewthrough_rate": round(insights.get("viewthrough_rate", 0), 2),
+                    "cpc": round(insights.get("cpc", 0), 2),
+                    "click_to_reg": round(insights.get("click_to_reg", 0), 2)
                 },
                 # We could add segment benchmarks from more detailed account data if needed
                 "segments": {}
@@ -88,7 +112,7 @@ class PerformanceAnalyzer:
             
             # Log the benchmark values we calculated
             benchmark_str = ", ".join([f"{k}: {v:.2f}" for k, v in benchmarks["benchmarks"].items()])
-            logger.info(f"Generated dynamic benchmarks from account data: {benchmark_str}")
+            logger.info(f"Generated dynamic benchmarks from {source_type} data: {benchmark_str}")
             
             # Save the benchmarks
             self.benchmarks = benchmarks
@@ -97,7 +121,13 @@ class PerformanceAnalyzer:
         except Exception as e:
             logger.exception(f"Error calculating benchmarks: {str(e)}")
             # Return minimal structure so the analyzer can function
-            return {"market": "Error", "benchmarks": {}}
+            return {
+                "market": client.region if client else "Error",
+                "benchmarks": {},
+                "benchmark_date": datetime.now().strftime('%d/%m/%Y'),
+                "source_type": source_type if 'source_type' in locals() else "error",
+                "source_id": source_id if 'source_id' in locals() else "error"
+            }
     
     def compare_to_benchmarks(self, ad_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -372,6 +402,18 @@ class PerformanceAnalyzer:
         logger.info(f"Comprehensive analysis complete for ad {ad_data.get('ad_id', 'unknown')}")
         
         return analysis
+        
+    def get_benchmarks(self):
+        """
+        Get current benchmarks, calculating them if needed
+        
+        Returns:
+            Dict: Benchmark data
+        """
+        if not self.benchmarks and self.meta_client:
+            self.benchmarks = self.calculate_benchmarks(self.meta_client)
+            
+        return self.benchmarks
 
 # Example usage
 if __name__ == "__main__":

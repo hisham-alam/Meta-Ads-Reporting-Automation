@@ -7,5 +7,9 @@
         "enabled_accounts": ["GBR", "NAM"],
         "specific_adset_ids": [],
         "specific_campaign_ids": ["6796244113265", "6715579230446"]
+    },
+    "benchmarking": {
+        "specific_campaign_id": "",
+        "specific_adset_id": ""
     }
 }

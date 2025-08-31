@@ -73,22 +73,19 @@ class SheetsFormatter:
             ad_name = ad_info.get("ad_name", "")
             ad_link = creative.get("video_url") or creative.get("image_url") or ""
             
-            # Determine creative angle (could be extended with more sophisticated logic)
-            creative_angle = "Unknown"  # Default value
-            # This would ideally be derived from ad data or provided by user
+            # Creative angle column has been removed
             
-            # Determine status and action based on performance
+            # Status and Action will be left empty for manual dropdown control
+            # We still calculate them for internal reference but don't use them in the sheet
             performance_score = analysis.get("benchmark_comparison", {}).get("overall_performance_score", 0)
             
-            if performance_score >= 20:
-                status = "Winning"
-                action = "Scale"
-            elif performance_score <= -20:
-                status = "Losing" 
-                action = "Stop"
-            else:
-                status = "Average"
-                action = "Monitor"
+            # Calculate but don't use these values - they will be set by user via dropdown
+            _calculated_status = "Winning" if performance_score >= 20 else ("Losing" if performance_score <= -20 else "Average")
+            _calculated_action = "Scale" if performance_score >= 20 else ("Stop" if performance_score <= -20 else "Monitor")
+            
+            # Set to empty strings so columns will be blank in the sheet
+            status = ""
+            action = ""
             
             # Use CPA as CPR (Cost Per Registration) value
             cpr_value = metrics.get("cpr", 0) or metrics.get("cpa", 0)
@@ -96,47 +93,23 @@ class SheetsFormatter:
             # Remove percentage change calculation as it's no longer needed
             cpr_percent_change = 0  # Set to 0 for backward compatibility
             
-            # Extract or create demographics insights
+            # Leave demographics blank as they will be filled by a separate AI script
             demographics = []
-            if "breakdowns" in ad_info and "age_gender" in ad_info["breakdowns"]:
-                age_gender_data = ad_info["breakdowns"]["age_gender"]
-                
-                # Find best performing demographics
-                if age_gender_data:
-                    # Sort by CPR (lower is better) if we have conversions
-                    convertors = [segment for segment in age_gender_data if segment.get("conversions", 0) > 0]
-                    if convertors:
-                        best_demo = sorted(convertors, key=lambda x: x.get("cpr", float("inf")))[0]
-                        demo_text = f"Strong performance with {best_demo.get('gender', 'Unknown')} {best_demo.get('age', '18-65')}."
-                        demographics.append(demo_text)
-                    
-                    # Also look for high engagement demographics
-                    engaged = sorted(age_gender_data, key=lambda x: x.get("ctr", 0), reverse=True)[0]
-                    if engaged:
-                        demo_text = f"Consistent engagement from {engaged.get('gender', 'Unknown')} {engaged.get('age', '18-65')}."
-                        demographics.append(demo_text)
             
-            # If no demographics data was found, use placeholder
-            if not demographics:
-                demographics = ["No significant demographic patterns identified."]
-            
-            # Extract or create AI analysis insights
-            # In a real implementation, these would come from an AI system
-            ai_analysis = []
-            if "insights" in analysis:
-                insights = analysis.get("insights", {})
-                if "summary" in insights and insights["summary"]:
-                    ai_analysis = insights["summary"]
-            
-            # If no AI insights were found, use placeholder
-            if not ai_analysis:
-                ai_analysis = ["Awaiting AI analysis."]
+            # Leave placements blank as they will be filled by a separate AI script
+            placements = []
             
             # Extract more metrics from the data
             spend = metrics.get("spend", 0)  # Ad spend
             impressions = metrics.get("impressions", 0)
             clicks = metrics.get("clicks", 0)  # Number of clicks
             conversions = metrics.get("conversions", 0)  # Number of conversions
+            
+            # Click to registration ratio - Get from Meta API metrics if available, otherwise calculate
+            click_to_reg = metrics.get("click_to_reg", 0)
+            # If not directly available, calculate from conversions/clicks from Meta API data
+            if click_to_reg == 0 and clicks > 0 and conversions > 0:
+                click_to_reg = round((conversions / clicks) * 100, 2)  # Convert to percentage like other metrics
             
             # Percentage metrics - calculate if not directly provided
             # CTR - Use value directly from API as it's already in percentage form
@@ -187,7 +160,6 @@ class SheetsFormatter:
                 "launched": launched,
                 "ad_name": ad_name,
                 "ad_link": ad_link,
-                "creative_angle": creative_angle,
                 "status": status,
                 "action": action,
                 "spend": spend,
@@ -197,13 +169,14 @@ class SheetsFormatter:
                 "ctr": ctr,
                 "cpm": cpm,
                 "cpc": cpc,
+                "click_to_reg": click_to_reg,
                 "hook_rate": hook_rate,
                 "viewthrough_rate": viewthrough_rate,
                 "ctr_destination": ctr_destination,
                 "cpr_value": cpr_value,
                 "cpr_percent_change": cpr_percent_change,
                 "demographics": demographics,
-                "ai_analysis": ai_analysis
+                "placements": placements
             }
             
             formatted_ads.append(formatted_ad)
@@ -232,12 +205,9 @@ class SheetsFormatter:
             # Format CPR value (use cpa value if cpr_value doesn't exist)
             cpr_value = ad.get("cpr_value", 0) or ad.get("cpa", 0)
             
-            # Format demographics and AI analysis as bulleted lists
-            demographics = ad.get("demographics", [])
-            demographics_str = "\n".join(f"• {item}" for item in demographics)
-            
-            ai_analysis = ad.get("ai_analysis", [])
-            ai_analysis_str = "\n".join(f"• {item}" for item in ai_analysis)
+            # Leave demographics and placements sections blank
+            demographics_str = ""
+            placements_str = ""
             
             # Create sheets-ready ad entry
             sheets_ad = ad.copy()
@@ -262,6 +232,12 @@ class SheetsFormatter:
                 cpc = spend / ad.get("clicks", 1)
             sheets_ad["cpc_formatted"] = f"£{cpc:.2f}"
             
+            # Click to Reg (conversion rate from clicks) - already calculated as percentage in format_ad_data_for_sheets
+            click_to_reg = ad.get("click_to_reg", 0)
+                
+            # Format as percentage like other metrics (blank if zero)
+            sheets_ad["click_to_reg_formatted"] = f"{click_to_reg:.2f}%" if click_to_reg > 0 else ""
+            
             # CPR (cost per registration/conversion)
             # Use cpa value as cpr value since they're the same metric
             cpr_value = ad.get("cpr_value", 0) or ad.get("cpa", 0)
@@ -274,12 +250,12 @@ class SheetsFormatter:
             
             sheets_ad["ctr_formatted"] = f"{ctr:.2f}%"
             # Format hook rate and viewthrough rate
-            # These values should now always be numbers, not strings
-            sheets_ad["hook_rate_formatted"] = f"{hook_rate:.2f}%" if hook_rate is not None else ""
-            sheets_ad["viewthrough_rate_formatted"] = f"{viewthrough_rate:.2f}%" if viewthrough_rate is not None else ""
+            # Leave blank when value is 0%
+            sheets_ad["hook_rate_formatted"] = f"{hook_rate:.2f}%" if hook_rate and hook_rate > 0 else ""
+            sheets_ad["viewthrough_rate_formatted"] = f"{viewthrough_rate:.2f}%" if viewthrough_rate and viewthrough_rate > 0 else ""
             
             sheets_ad["demographics_formatted"] = demographics_str
-            sheets_ad["ai_analysis_formatted"] = ai_analysis_str
+            sheets_ad["placements_formatted"] = placements_str
             
             sheets_ready_ads.append(sheets_ad)
         
@@ -310,8 +286,15 @@ class SheetsFormatter:
             
             # Format percentages
             csv_ad["ctr"] = f"{ad.get('ctr', 0):.2f}%"
-            csv_ad["hook_rate"] = f"{ad.get('hook_rate', 0):.2f}%"
-            csv_ad["viewthrough_rate"] = f"{ad.get('viewthrough_rate', 0):.2f}%"
+            
+            # Leave hook_rate blank if 0
+            hook_rate = ad.get('hook_rate', 0)
+            csv_ad["hook_rate"] = f"{hook_rate:.2f}%" if hook_rate and hook_rate > 0 else ""
+            
+            # Leave viewthrough_rate blank if 0
+            viewthrough_rate = ad.get('viewthrough_rate', 0)
+            csv_ad["viewthrough_rate"] = f"{viewthrough_rate:.2f}%" if viewthrough_rate and viewthrough_rate > 0 else ""
+            
             csv_ad["ctr_destination"] = f"{ad.get('ctr_destination', 0):.2f}%"
             
             # Format impressions with thousands separator
@@ -328,12 +311,12 @@ class SheetsFormatter:
         # Create DataFrame from formatted ads
         df = pd.DataFrame(csv_ready_ads)
         
-        # Format lists as strings for CSV
+        # Leave demographics and placements blank in CSV
         if "demographics" in df.columns:
-            df["demographics"] = df["demographics"].apply(lambda x: "\n".join(x) if isinstance(x, list) else str(x))
-        
-        if "ai_analysis" in df.columns:
-            df["ai_analysis"] = df["ai_analysis"].apply(lambda x: "\n".join(x) if isinstance(x, list) else str(x))
+            df["demographics"] = ""
+            
+        if "placements" in df.columns:
+            df["placements"] = ""
         
         # Create output filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -361,10 +344,10 @@ class SheetsFormatter:
         """
         # Define column order - matching SheetsManager.AD_DETAILS_COLUMNS
         columns = [
-            "launched", "ad_name_formula", "creative_angle", "status", 
+            "launched", "ad_name_formula", "status", 
             "action", "spend_formatted", "cpm_formatted", "hook_rate_formatted",
-            "viewthrough_rate_formatted", "ctr_formatted", "cpc_formatted", "cpr_formatted", 
-            "demographics_formatted", "ai_analysis_formatted"
+            "viewthrough_rate_formatted", "ctr_formatted", "cpc_formatted", "click_to_reg_formatted", "cpr_formatted", 
+            "demographics_formatted", "placements_formatted"
         ]
         
         # Create 2D array
@@ -372,10 +355,10 @@ class SheetsFormatter:
         
         # Add header row - matching SheetsManager.AD_DETAILS_COLUMNS
         headers = [
-            "Launch Date", "Ad Name", "Creative Angle", "Status", 
+            "Launch Date", "Ad Name", "Status", 
             "Action", "Spend", "CPM", "Hook Rate", 
-            "VT Rate", "CTR", "CPC", "CPR", 
-            "Demographics", "AI Analysis"
+            "VT Rate", "CTR", "CPC", "Click to Reg", "CPR", 
+            "Demographics", "Placements"
         ]
         rows.append(headers)
         

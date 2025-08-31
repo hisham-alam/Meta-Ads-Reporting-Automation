@@ -54,10 +54,10 @@ class SheetsManager:
     ]
     
     AD_DETAILS_COLUMNS = [
-        "Launch Date", "Ad Name", "Creative Angle", "Status", 
+        "Launch Date", "Ad Name", "Status", 
         "Action", "Spend", "CPM", "Hook Rate", 
-        "VT Rate", "CTR", "CPC", "CPR", 
-        "Demographics", "AI Analysis"
+        "VT Rate", "CTR", "CPC", "Click to Reg", "CPR", 
+        "Demographics", "Placements"
     ]
     
     SEGMENTS_COLUMNS = [
@@ -1077,8 +1077,8 @@ class SheetsManager:
                     }
                 })
             
-            # Percentage formatting for CTR and Performance vs Benchmark
-            percentage_columns = [9, 13]  # CTR, Performance vs Benchmark
+            # Percentage formatting for CTR, Click to Reg, and Performance vs Benchmark
+            percentage_columns = [9, 10, 13]  # CTR, Click to Reg, Performance vs Benchmark
             for column_index in percentage_columns:
                 requests.append({
                     'repeatCell': {
@@ -1207,7 +1207,22 @@ class SheetsManager:
             else:  # Data exists, append after last row
                 next_row = max(2, next_row)  # Make sure we start at row 2 at minimum
             
-            # Write new data (including header if this is the first data)
+            # First clear any existing content in the cells where we'll add data
+            # This ensures we start with a clean slate for dropdowns to work properly
+            clear_range = f"{ad_details_tab}!A{next_row}:Z{next_row + len(sheets_ready_ads)}"
+            self.service.spreadsheets().values().clear(
+                spreadsheetId=self.spreadsheet_id,
+                range=clear_range
+            ).execute()
+            
+            # Second, apply special formatting, including data validation for dropdowns
+            self._apply_special_formatting(sheet_id, len(sheets_ready_ads))
+            
+            # Wait a moment for validation to take effect
+            import time
+            time.sleep(1)
+            
+            # Then write new data (including header if this is the first data)
             body = {
                 'values': rows_data[1:] if next_row > 1 else rows_data  # Include header if first data
             }
@@ -1219,9 +1234,6 @@ class SheetsManager:
                 valueInputOption='USER_ENTERED',  # For formulas to work
                 body=body
             ).execute()
-            
-            # Apply formatting
-            self._apply_special_formatting(sheet_id, len(sheets_ready_ads))
             
             success_count = len(sheets_ready_ads)
             logger.info(f"Ad details batch update complete: {success_count} ads updated")
@@ -1308,21 +1320,21 @@ class SheetsManager:
                 }
             })
             
-            # Make Demographics and AI Analysis columns wider
+            # Make Demographics and Placements columns wider
             requests.append({
                 'updateDimensionProperties': {
                     'range': {
                         'sheetId': sheet_id,
                         'dimension': 'COLUMNS',
                         'startIndex': 6,  # Demographics
-                        'endIndex': 8     # Through AI Analysis
+                        'endIndex': 7     # Through Placements
                     },
                     'properties': {'pixelSize': 300},
                     'fields': 'pixelSize'
                 }
             })
             
-            # Apply text wrapping to Demographics and AI Analysis
+            # Apply text wrapping to Demographics and Placements
             requests.append({
                 'repeatCell': {
                     'range': {
@@ -1330,7 +1342,7 @@ class SheetsManager:
                         'startRowIndex': 1,
                         'endRowIndex': row_count + 1,
                         'startColumnIndex': 6,
-                        'endColumnIndex': 8
+                        'endColumnIndex': 7
                     },
                     'cell': {
                         'userEnteredFormat': {
@@ -1361,15 +1373,29 @@ class SheetsManager:
                 }
             })
             
-            # Set data validation for status column
+            # First clear existing data validation for status column
+            requests.append({
+                'clearDataValidation': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'startRowIndex': 1,
+                        'endRowIndex': 1000,  # Apply to all potential rows
+                        'startColumnIndex': 2,  # Status column (updated for removed Creative Angle column)
+                        'endColumnIndex': 3
+                    }
+                }
+            })
+            
+            # Set data validation for status column - with modern pill-style UI
+            # Exactly matching the API example provided
             requests.append({
                 'setDataValidation': {
                     'range': {
                         'sheetId': sheet_id,
                         'startRowIndex': 1,
                         'endRowIndex': 1000,  # Apply to all potential rows
-                        'startColumnIndex': 3,  # Status column
-                        'endColumnIndex': 4
+                        'startColumnIndex': 2,  # Status column (updated for removed Creative Angle column)
+                        'endColumnIndex': 3
                     },
                     'rule': {
                         'condition': {
@@ -1380,21 +1406,36 @@ class SheetsManager:
                                 {'userEnteredValue': 'Losing'}
                             ]
                         },
-                        'showCustomUi': True,
-                        'strict': False
+                        'inputMessage': 'Select a status.',
+                        'strict': True,
+                        'showCustomUi': True  # This is the magic property! ✨
                     }
                 }
             })
             
-            # Set data validation for action column
+            # First clear existing data validation for action column
+            requests.append({
+                'clearDataValidation': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'startRowIndex': 1,
+                        'endRowIndex': 1000,  # Apply to all potential rows
+                        'startColumnIndex': 3,  # Action column (updated for removed Creative Angle column)
+                        'endColumnIndex': 4
+                    }
+                }
+            })
+            
+            # Set data validation for action column - with modern pill-style UI
+            # Exactly matching the API example provided
             requests.append({
                 'setDataValidation': {
                     'range': {
                         'sheetId': sheet_id,
                         'startRowIndex': 1,
                         'endRowIndex': 1000,  # Apply to all potential rows
-                        'startColumnIndex': 4,  # Action column
-                        'endColumnIndex': 5
+                        'startColumnIndex': 3,  # Action column (updated for removed Creative Angle column)
+                        'endColumnIndex': 4
                     },
                     'rule': {
                         'condition': {
@@ -1405,39 +1446,14 @@ class SheetsManager:
                                 {'userEnteredValue': 'Stop'}
                             ]
                         },
-                        'showCustomUi': True,
-                        'strict': False
+                        'inputMessage': 'Select an action.',
+                        'strict': True,
+                        'showCustomUi': True  # This is the magic property! ✨
                     }
                 }
             })
             
-            # Set data validation for creative angle column
-            requests.append({
-                'setDataValidation': {
-                    'range': {
-                        'sheetId': sheet_id,
-                        'startRowIndex': 1,
-                        'endRowIndex': 1000,  # Apply to all potential rows
-                        'startColumnIndex': 2,  # Creative angle column
-                        'endColumnIndex': 3
-                    },
-                    'rule': {
-                        'condition': {
-                            'type': 'ONE_OF_LIST',
-                            'values': [
-                                {'userEnteredValue': 'Comparison'},
-                                {'userEnteredValue': 'Testimonial'},
-                                {'userEnteredValue': 'Educational'},
-                                {'userEnteredValue': 'Problem-Solution'},
-                                {'userEnteredValue': 'Lifestyle'},
-                                {'userEnteredValue': 'Product Demo'}
-                            ]
-                        },
-                        'showCustomUi': True,
-                        'strict': False
-                    }
-                }
-            })
+            # Creative angle column has been removed
             
             # Add conditional formatting for status column
             requests.append({
@@ -1447,8 +1463,8 @@ class SheetsManager:
                             'sheetId': sheet_id,
                             'startRowIndex': 1,
                             'endRowIndex': 1000,
-                            'startColumnIndex': 3,  # Status column
-                            'endColumnIndex': 4
+                            'startColumnIndex': 2,  # Status column (updated for removed Creative Angle column)
+                            'endColumnIndex': 3
                         }],
                         'booleanRule': {
                             'condition': {
@@ -1474,8 +1490,8 @@ class SheetsManager:
                             'sheetId': sheet_id,
                             'startRowIndex': 1,
                             'endRowIndex': 1000,
-                            'startColumnIndex': 3,  # Status column
-                            'endColumnIndex': 4
+                            'startColumnIndex': 2,  # Status column (updated for removed Creative Angle column)
+                            'endColumnIndex': 3
                         }],
                         'booleanRule': {
                             'condition': {
@@ -1501,8 +1517,8 @@ class SheetsManager:
                             'sheetId': sheet_id,
                             'startRowIndex': 1,
                             'endRowIndex': 1000,
-                            'startColumnIndex': 3,  # Status column
-                            'endColumnIndex': 4
+                            'startColumnIndex': 2,  # Status column (updated for removed Creative Angle column)
+                            'endColumnIndex': 3
                         }],
                         'booleanRule': {
                             'condition': {
@@ -1520,12 +1536,24 @@ class SheetsManager:
                 }
             })
             
-            # Execute batch update
-            if requests:
-                body = {'requests': requests}
+            # First execute validation rules separately to ensure they work properly
+            validation_requests = [req for req in requests if 'setDataValidation' in req or 'clearDataValidation' in req]
+            formatting_requests = [req for req in requests if 'setDataValidation' not in req and 'clearDataValidation' not in req]
+            
+            if validation_requests:
+                validation_body = {'requests': validation_requests}
                 self.service.spreadsheets().batchUpdate(
                     spreadsheetId=self.spreadsheet_id,
-                    body=body
+                    body=validation_body
+                ).execute()
+                logger.info(f"Applied data validation rules")
+                
+            # Then execute all other formatting requests
+            if formatting_requests:
+                formatting_body = {'requests': formatting_requests}
+                self.service.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body=formatting_body
                 ).execute()
                 logger.info(f"Applied special formatting to {row_count} rows")
                 

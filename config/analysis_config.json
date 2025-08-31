@@ -1,0 +1,11 @@
+{
+    "ad_selection_criteria": {
+        "days_since_launch": 7,
+        "minimum_spend": 250.0
+    },
+    "account_filters": {
+        "enabled_accounts": ["GBR", "NAM"],
+        "specific_adset_ids": [],
+        "specific_campaign_ids": ["6796244113265", "6715579230446"]
+    }
+}

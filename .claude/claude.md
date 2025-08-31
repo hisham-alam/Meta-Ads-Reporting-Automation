@@ -1,0 +1,2 @@
+- Always use python3 and pip3 for commands
+- Never delete anything without asking
